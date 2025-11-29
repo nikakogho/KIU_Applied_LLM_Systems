@@ -1,0 +1,167 @@
+namespace AwesomeCode.Demos
+{
+    public sealed class SceneManager : MonoBehaviour
+    {
+        public GameObject descriptionPanel;
+
+        public GameObject model;
+
+        publicTextMeshProUGUI countText;
+
+        public TextMeshProUGUI framerateText;
+
+        public TextMeshProUGUI resultsText;
+
+        public float secondsBetweenFramerateUpdates = 0.25f;
+
+        public GameObject canvasParent;
+
+        public float offset = 0;
+
+        public int columns = 20;
+
+        public int rows = 10;
+
+        public int targetLowFramerate = 50;
+
+        public float secondsSinceLastFramerateUpdate = 0.0f;
+
+        public int currentCount = 0;
+
+        // List for tracking the instantiated objects.
+        private List<GameObject> testObjects = new List<GameObject>();
+
+        // Boolean for tracking the end of the test.
+        private bool testComplete = true;
+
+        // The current framerate.
+        private float frameRate = 0f;
+
+        // Which column is being filled.
+        private int rankY = 0;
+
+        // y-Axis local distance for the current instantiated object.
+        private float yOffset = 0.0f;
+
+        // Which rank in the z axis is being filled.
+        private int rankZ = 0;
+
+        // x-Axis local distance for the current instantiated object.
+        private float zOffset = 0.0f;
+
+        // How many frames before instantiating the next object.
+        private int frameWait = 10;
+
+        // How many frames have had the framerate below the target.
+        private int lowFramerateFrameCount = 0;
+
+        /// <summary>
+        /// A Unity event function that is called on the frame when a script is enabled just before any of the update methods are called the first time.
+        /// </summary> 
+        private void Start()
+        {
+            // prevent divide by zero
+            if (columns == 0)
+            {
+                columns = 20;
+            }
+        }
+
+        public void StartTest()
+        {
+            // Trigger the test
+            descriptionPanel.SetActive(false);
+            resultsText.text = string.Empty;
+            lowFramerateFrameCount = 0;
+
+            SetModelCount(0);
+            testComplete = false;
+        }
+
+        /// <summary>
+        /// A Unity event function that is called every frame after normal update functions, if this object is enabled.
+        /// </summary>
+        private void LateUpdate()
+        {
+            secondsSinceLastFramerateUpdate += Time.deltaTime;
+            frameRate = (int)(1.0f / Time.smoothDeltaTime);
+
+            if (secondsSinceLastFramerateUpdate >= secondsBetweenFramerateUpdates)
+            {
+                framerateText.text = frameRate.ToString();
+                secondsSinceLastFramerateUpdate = 0;
+            }
+        }
+
+        /// <summary>
+        /// A Unity event function that is called every frame, if this object is enabled.
+        /// </summary>
+        private void Update()
+        {
+            if (testComplete)
+            {
+                return;
+            }
+
+            if (frameRate < targetLowFramerate)
+            {
+                lowFramerateFrameCount++;
+            }
+
+            if (currentCount < 2000 && lowFramerateFrameCount < 60)
+            {
+                if (frameWait == 0)
+                {
+                    int cachedCount = currentCount;
+                    cachedCount++;
+                    SetModelCount(cachedCount);
+                    frameWait = 10;
+                }
+                else
+                    frameWait--;
+            }
+            else
+            {
+                testComplete = true;
+                resultsText.text = $"Test dropped below target framerate after {currentCount} objects.  Test complete.";
+                Debug.Log(resultsText.text);
+                descriptionPanel.SetActive(true);
+            }
+        }
+
+        public void SetModelCount(int count)
+        {
+            if (count < currentCount)
+            {
+                // delete models
+                while (count < currentCount && testObjects.Count > 0)
+                {
+                    Destroy(testObjects[testObjects.Count - 1]);
+                    testObjects.RemoveAt(testObjects.Count - 1);
+                    currentCount--;
+                }
+            }
+            else if (count > currentCount)
+            {
+                // spawn object
+                while (count > currentCount)
+                {
+                    var m = Instantiate(model);
+
+                    m.transform.parent = canvasParent.transform;
+                    m.transform.localScale = Vector3.one;
+
+                    rankZ = currentCount / (rows * columns);
+                    zOffset = rankZ * offset;
+                    rankY = (int)(currentCount / columns);
+                    yOffset = rankY % rows * offset;
+                    m.transform.localPosition = new Vector3((currentCount % columns) * offset, yOffset, zOffset);
+                    testObjects.Add(m);
+                    currentCount++;
+                }
+            }
+
+            countText.text = currentCount.ToString();
+        }
+    }
+}
