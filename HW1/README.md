@@ -33,13 +33,15 @@ snippets/
 │
 ├── MixedRealityToolkit/
 │   ├── snippet_1/
-│   │   ├── original_snippet.cs
+│   │   ├── original.cs
 │   │   ├── plagiarised/
 │   │   │   ├── plag_1.cs
 │   │   │   ├── plag_2.cs
+│   │   │   ├── plag_3.cs
 │   │   └── non-plagiarised/
 │   │       ├── non_1.cs
 │   │       ├── non_2.cs
+│   │   │   ├── non_3.cs
 │   ├── snippet_2/
 │   └── ...
 │
@@ -55,3 +57,11 @@ snippets/
 └── BrainFlow/
     └── snippet_1/ ... snippet_6/
 ```
+
+## Data Collection & Transformation
+From each repo I picked 6 snippets (sometimes a method sometimes an entire .cs file) that seemed most different from each other while each implementing a different non-trivial logic.
+
+I then (with some mix of manual work and ChatGPT assistance) derived 3 plagiarised and 3 non-plagiarised alternatively implemented version of each snippet.
+
+Plagiarised versions are slight reshuffles and renames while keeping core logic same,
+while non-plagiarised versions extract first principles and rebuild the logic from scratch and go a different route (verified both by myself manually and double-checked by GPT-5.1 Thinking)
