@@ -451,6 +451,9 @@ def main():
     # Ensure DB exists from the start
     initialize_database()
 
+    # Keep last 10 user–agent pairs as context
+    history: List[Dict[str, str]] = []
+
     while True:
         try:
             user_input = input("You: ").strip()
@@ -466,7 +469,8 @@ def main():
             continue
 
         # 1. Build the input list for this turn
-        input_items: List[Any] = [
+        recent_history = history[-20:]  # up to 10 (user, assistant) pairs
+        input_items: List[Any] = recent_history + [
             {"role": "user", "content": user_input}
         ]
 
@@ -498,10 +502,16 @@ def main():
                 instructions=SYSTEM_INSTRUCTIONS,
             )
 
-            print("Agent:", final_response.output_text)
+            agent_text = final_response.output_text
         else:
             # No tools needed; just answer directly
-            print("Agent:", response.output_text)
+            agent_text = response.output_text
+
+        print("Agent:", agent_text)
+
+        # Update conversation history (keep all; we slice when sending)
+        history.append({"role": "user", "content": user_input})
+        history.append({"role": "assistant", "content": agent_text})
 
 
 if __name__ == "__main__":
