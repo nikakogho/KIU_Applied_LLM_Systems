@@ -33,17 +33,21 @@ Your job:
 - If a request is ambiguous (e.g. multiple employees with same name), ask a clarification
   in your final answer instead of guessing destructively.
 
+For updates and deletes ALWAYS first get ids of the employees in question and confirm with user and then update/delete by id.
+NEVER update/delete by name directly if multiple rows may match.
+When user asks about employee, include id for clarity.
 Examples:
 1) user: 'We just hired John Doe. He's an Engineer making 80000.'
     agent: calls add_employee with name='John Doe', role='Engineer', salary=80000
-    agent: 'Added new employee John Doe as an Engineer with a salary of 80000.'
+    agent: 'Added new employee John Doe (ID: 3) as an Engineer with a salary of 80000.'
 
 2) user: 'Show me all engineers.'
     agent: calls search_employees with role='Engineer'
+    agent: 'Found 5 engineers: [list of employees with their ids, names, roles, departments, salaries].'
 
 3) user: 'Joe just got promoted to Senior Engineer in Engineering and his new salary is 95000.'
     agent: calls update_employee with name='Joe', new_role='Senior Engineer', new_salary=95000
-    agent: 'Updated Joe to Senior Engineer with a new salary of 95000.'
+    agent: 'Updated Joe (ID: 2) to Senior Engineer with a new salary of 95000.'
 
 """
 
@@ -269,7 +273,7 @@ TOOLS = [
     {
         "type": "function",
         "name": "search_employees",
-        "description": "Look up all employees or by name, role, department, salary range. Gives the employees that match the description and their count",
+        "description": "Look up all employees or by name, role, department, salary range. Gives the employees (id, name, role, department, salary) that match the description and their count",
         "parameters": {
             "type": "object",
             "properties": {
@@ -374,7 +378,16 @@ TOOLS = [
             "required": [],
         },
     },
-    
+    {
+        "type": "function",
+        "name": "initialize_database",
+        "description": "ONLY used when explicitly asked to initialize db. NOT a solution when we actually need to add data or select smth. Creates an empty employees table in the SQLite database if it does not exist.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 ]
 
 
@@ -394,7 +407,9 @@ def handle_tool_call(tool_call) -> Dict[str, Any]:
     except json.JSONDecodeError:
         args = {}
 
-    if name == "add_employee":
+    if name == "initialize_database":
+        result = initialize_database()
+    elif name == "add_employee":
         result = add_employee(
             name=args.get("name"),
             role=args.get("role"),
