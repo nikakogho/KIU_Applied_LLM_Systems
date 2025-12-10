@@ -445,7 +445,7 @@ def main():
     print("  - 'We just hired John Doe. He's an Engineer making 80000.'")
     print("  - 'Mary got promoted to Head of IT. Increase her salary to 300K.'")
     print("  - 'Show me all Engineers.'")
-    print("  - How many people named 'Alice' do we have?'")
+    print("  - 'How many people named 'Alice' do we have?'")
     print("  - 'Fire John Doe.'")
     print("Type 'exit' or 'quit' to stop.")
     print()
