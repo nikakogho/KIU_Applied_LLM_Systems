@@ -11,7 +11,7 @@ import time
 import traceback
 import tkinter as tk
 from dataclasses import asdict, is_dataclass
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 
 from agents.data_cleaner_agent import DataCleanerAgent
 from agents.feature_engineer_agent import FeatureEngineerAgent
@@ -73,10 +73,26 @@ class _QueueWriter:
 
 
 class DataScienceTeamGUI(tk.Tk):
+    """
+    GUI runner with:
+      - per-agent progress messages
+      - guaranteed DONE/FAILED message
+      - heartbeat "still running..." every 5s
+      - per-agent model selection dropdowns
+    """
+
+    # Weakest -> strongest (as requested)
+    MODEL_OPTIONS = [
+        "gpt-4o-mini",
+        "gpt-4.1-mini",
+        "gpt-4.1",
+        "gpt-5",
+    ]
+
     def __init__(self):
         super().__init__()
         self.title("DataScienceTeam Runner")
-        self.geometry("980x720")
+        self.geometry("1020x780")
 
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self._running = False
@@ -110,8 +126,39 @@ class DataScienceTeamGUI(tk.Tk):
         self.feedback_var = tk.StringVar(value="")
         tk.Entry(frm, textvariable=self.feedback_var, width=80).grid(row=4, column=1, sticky="we", padx=(6, 6), pady=(8, 0))
 
+        # -------------------------
+        # Model selection (per agent)
+        # -------------------------
+        models_box = tk.LabelFrame(frm, text="OpenAI model per agent", padx=10, pady=8)
+        models_box.grid(row=5, column=0, columnspan=3, sticky="we", pady=(12, 0))
+
+        # defaults: A/B = 4o-mini, C = gpt-5
+        self.model_a_var = tk.StringVar(value="gpt-4o-mini")
+        self.model_b_var = tk.StringVar(value="gpt-4o-mini")
+        self.model_c_var = tk.StringVar(value="gpt-5")
+
+        tk.Label(models_box, text="Agent A (Cleaner):").grid(row=0, column=0, sticky="w")
+        self.model_a_combo = ttk.Combobox(models_box, textvariable=self.model_a_var, values=self.MODEL_OPTIONS, state="readonly", width=18)
+        self.model_a_combo.grid(row=0, column=1, sticky="w", padx=(8, 18))
+
+        tk.Label(models_box, text="Agent B (Features):").grid(row=0, column=2, sticky="w")
+        self.model_b_combo = ttk.Combobox(models_box, textvariable=self.model_b_var, values=self.MODEL_OPTIONS, state="readonly", width=18)
+        self.model_b_combo.grid(row=0, column=3, sticky="w", padx=(8, 18))
+
+        tk.Label(models_box, text="Agent C (Trainer):").grid(row=0, column=4, sticky="w")
+        self.model_c_combo = ttk.Combobox(models_box, textvariable=self.model_c_var, values=self.MODEL_OPTIONS, state="readonly", width=18)
+        self.model_c_combo.grid(row=0, column=5, sticky="w", padx=(8, 0))
+
+        # small helper note
+        tk.Label(
+            models_box,
+            text="Ordered weakest→strongest. Faster models help A/B a lot. C often benefits most from GPT-5.",
+            fg="gray"
+        ).grid(row=1, column=0, columnspan=6, sticky="w", pady=(6, 0))
+
+        # Buttons
         btn_row = tk.Frame(frm)
-        btn_row.grid(row=5, column=0, columnspan=3, sticky="we", pady=(12, 0))
+        btn_row.grid(row=6, column=0, columnspan=3, sticky="we", pady=(12, 0))
 
         self.run_btn = tk.Button(btn_row, text="Run pipeline", command=self._on_run_clicked)
         self.run_btn.pack(side="left")
@@ -123,12 +170,14 @@ class DataScienceTeamGUI(tk.Tk):
         self.clear_btn.pack(side="left", padx=(10, 0))
 
         frm.grid_columnconfigure(1, weight=1)
+        models_box.grid_columnconfigure(5, weight=1)
 
+        # Log area
         log_frame = tk.Frame(self, padx=10, pady=10)
         log_frame.pack(fill="both", expand=True)
 
         tk.Label(log_frame, text="Log:").pack(anchor="w")
-        self.log_text = tk.Text(log_frame, height=28, wrap="word")
+        self.log_text = tk.Text(log_frame, height=30, wrap="word")
         self.log_text.pack(fill="both", expand=True)
 
         self.after(100, self._poll_log_queue)
@@ -164,6 +213,11 @@ class DataScienceTeamGUI(tk.Tk):
     def _set_running(self, running: bool) -> None:
         self._running = running
         self.run_btn.config(state=("disabled" if running else "normal"))
+        # disable combos while running
+        state = "disabled" if running else "readonly"
+        self.model_a_combo.config(state=state)
+        self.model_b_combo.config(state=state)
+        self.model_c_combo.config(state=state)
 
     def _open_last_folder(self) -> None:
         if self._last_run_folder and os.path.isdir(self._last_run_folder):
@@ -207,6 +261,11 @@ class DataScienceTeamGUI(tk.Tk):
         runs_dir = self.runsdir_var.get().strip() or "runs"
         feedback = self.feedback_var.get().strip() or None
 
+        # Model choices
+        model_a = self.model_a_var.get().strip() or "gpt-4o-mini"
+        model_b = self.model_b_var.get().strip() or "gpt-4o-mini"
+        model_c = self.model_c_var.get().strip() or "gpt-5"
+
         if not raw:
             messagebox.showerror("Missing input", "Please select a raw CSV file.")
             return
@@ -215,6 +274,10 @@ class DataScienceTeamGUI(tk.Tk):
             return
         if not target:
             messagebox.showerror("Missing input", "Please enter the target column name.")
+            return
+
+        if model_a not in self.MODEL_OPTIONS or model_b not in self.MODEL_OPTIONS or model_c not in self.MODEL_OPTIONS:
+            messagebox.showerror("Bad model selection", "Selected model is not in the allowed options.")
             return
 
         self._set_running(True)
@@ -227,13 +290,17 @@ class DataScienceTeamGUI(tk.Tk):
         self._append_log(f"target: {target}\n")
         self._append_log(f"run_id: {run_id or '(auto)'}\n")
         self._append_log(f"runs_dir: {runs_dir}\n")
-        self._append_log(f"feedback: {feedback or '(none)'}\n\n")
+        self._append_log(f"feedback: {feedback or '(none)'}\n")
+        self._append_log("\n--- Models ---\n")
+        self._append_log(f"Agent A model: {model_a}\n")
+        self._append_log(f"Agent B model: {model_b}\n")
+        self._append_log(f"Agent C model: {model_c}\n\n")
 
         self._start_heartbeat()
 
         t = threading.Thread(
             target=self._run_pipeline_thread,
-            args=(raw, target, run_id, runs_dir, feedback),
+            args=(raw, target, run_id, runs_dir, feedback, model_a, model_b, model_c),
             daemon=True,
         )
         t.start()
@@ -242,7 +309,17 @@ class DataScienceTeamGUI(tk.Tk):
     # Pipeline runner (per-agent progress + guaranteed DONE/FAILED)
     # -------------------------
 
-    def _run_pipeline_thread(self, raw: str, target: str, run_id: str | None, runs_dir: str, feedback: str | None) -> None:
+    def _run_pipeline_thread(
+        self,
+        raw: str,
+        target: str,
+        run_id: str | None,
+        runs_dir: str,
+        feedback: str | None,
+        model_a: str,
+        model_b: str,
+        model_c: str,
+    ) -> None:
         # Redirect stdout/stderr from *this worker thread* to GUI
         old_stdout, old_stderr = sys.stdout, sys.stderr
         sys.stdout = _QueueWriter(self.log_queue)
@@ -264,6 +341,7 @@ class DataScienceTeamGUI(tk.Tk):
             "clean_data_path": None,
             "engineered_data_path": None,
             "target": target,
+            "models": {"agent_a": model_a, "agent_b": model_b, "agent_c": model_c},
             "final_metrics": {},
             "status": "failed",
             "error": None,
@@ -283,6 +361,7 @@ class DataScienceTeamGUI(tk.Tk):
                 "raw_csv_path": raw,
                 "target": target,
                 "feedback": feedback,
+                "models": summary["models"],
                 "started_at_unix": time.time(),
             })
             try:
@@ -290,13 +369,14 @@ class DataScienceTeamGUI(tk.Tk):
             except Exception:
                 pass
 
-            # Instantiate agents
-            agent_a = DataCleanerAgent(model="gpt-5")
-            agent_b = FeatureEngineerAgent(model="gpt-5")
-            agent_c = ModelTrainerAgent(model="gpt-5", max_attempts=7, log_events=True)
+            # Instantiate agents with selected models
+            agent_a = DataCleanerAgent(model=model_a)
+            agent_b = FeatureEngineerAgent(model=model_b)
+            agent_c = ModelTrainerAgent(model=model_c, max_attempts=7, log_events=True)
 
             # ---------------- Agent A ----------------
             self.log_queue.put("\n--- Agent A: Data Cleaning (START) ---\n")
+            self.log_queue.put(f"[Agent A model: {model_a}]\n")
             t0 = time.time()
             a_res = agent_a.run(
                 raw_csv_path=raw,
@@ -313,7 +393,6 @@ class DataScienceTeamGUI(tk.Tk):
             agent_a_summary = (a_plain.get("audit_summary") if isinstance(a_plain, dict) else None) or "(no audit_summary)"
 
             if not clean_data_path or not isinstance(clean_data_path, str):
-                # still finalize cleanly with explicit message
                 raise RuntimeError("Agent A returned no clean_data_path (or wrong type).")
 
             summary["clean_data_path"] = clean_data_path
@@ -326,6 +405,7 @@ class DataScienceTeamGUI(tk.Tk):
 
             # ---------------- Agent B ----------------
             self.log_queue.put("\n--- Agent B: Feature Engineering (START) ---\n")
+            self.log_queue.put(f"[Agent B model: {model_b}]\n")
             t0 = time.time()
             b_res = agent_b.run(
                 clean_data_path=clean_data_path,
@@ -354,6 +434,7 @@ class DataScienceTeamGUI(tk.Tk):
 
             # ---------------- Agent C ----------------
             self.log_queue.put("\n--- Agent C: Model Training (START) ---\n")
+            self.log_queue.put(f"[Agent C model: {model_c}]\n")
             t0 = time.time()
             c_res = agent_c.run(
                 engineered_data_path=engineered_data_path,
@@ -373,13 +454,14 @@ class DataScienceTeamGUI(tk.Tk):
 
                 summary["final_metrics"] = final_metrics if isinstance(final_metrics, dict) else {}
 
-                # write convenience files even if empty (so user sees "generated but empty")
+                if isinstance(final_metrics, dict) and final_metrics.get("error"):
+                    raise RuntimeError("Try again or check that your data is not utter garbage")
+
                 with open(os.path.join(d_c, "final_code.py"), "w", encoding="utf-8") as f:
                     f.write(final_code or "# (empty final_code)\n")
                 with open(os.path.join(d_c, "training_log.txt"), "w", encoding="utf-8") as f:
                     f.write(training_log or "(empty training_log)\n")
             else:
-                # still create the files so user sees completion
                 with open(os.path.join(d_c, "final_code.py"), "w", encoding="utf-8") as f:
                     f.write("# (agent_c_result was not dict-like)\n")
                 with open(os.path.join(d_c, "training_log.txt"), "w", encoding="utf-8") as f:
