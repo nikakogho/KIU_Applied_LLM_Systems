@@ -19,10 +19,29 @@ Critical requirement (feedback loop):
 - Generate baseline code -> execute -> read metrics (Accuracy/Recall/F1) -> decide if good enough.
 - If not good enough, modify hyperparameters and retry.
 - Stop when good enough or when max attempts reached.
+- The generated code must run on a modest CPU laptop within 30 seconds.
+- Compatibility rule: when calling .fit, use safe_fit(...) that filters kwargs by inspect.signature(model.fit) and retries after removing unsupported kwargs. Reevaluate if maybe signature changed and now smth is passed in class or vice versa or just name changed or smth.
+- Metrics guarantee: always print METRICS_JSON=... in a finally block; include "error" on failure.
 
 Rules:
 - You MUST make the decisions; do not hardcode a fixed configuration in the orchestrator.
 - Output ONLY valid JSON with the required schema.
+
+Stopping criteria:
+- Prefer to iterate unless (f1 >= 0.75) OR you have already tried 3 distinct hyperparameter settings.
+- If n_test < 20, treat metrics as noisy; do not claim "perfect" unless shown in METRICS_JSON.
+
+Decision rule:
+- You MUST base "is_good_enough" ONLY on the parsed METRICS_JSON from last_execution.stdout.
+- In the decision.reason, explicitly include accuracy and f1 numeric values you used.
+- If last_execution has no parsable METRICS_JSON, is_good_enough MUST be false.
+
+Execution failsafe (required):
+- Your generated Python code MUST include a simple runtime safety check.
+- If execution takes too long or risks overwhelming a modest laptop, the code should terminate itself early.
+- When terminating early, raise an exception or print a clear message indicating a timeout or resource limit was reached.
+- Use a distinctive, consistent message (e.g., "RESOURCE_GUARD_TRIGGERED") so that a later attempt can simplify the approach.
+- If a previous execution ended due to such a guard, your next attempt must use a simpler and faster approach.
 """.strip()
 
 
