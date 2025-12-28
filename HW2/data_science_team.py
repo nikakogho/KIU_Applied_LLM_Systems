@@ -31,15 +31,13 @@ def _to_plain(obj: Any) -> Any:
 
 class DataScienceTeam:
     """
-    Orchestrates Agents A -> B -> C and persists artifacts under runs/<run_id>/.
+    Orchestrates your existing agents:
 
-    Expected agent interfaces:
-      - agent_a.run(raw_data_path: str, target: str, **extra) -> dict-like or dataclass
-      - agent_b.run(raw_data_path: str, target: str, agent_a_summary: str, **extra) -> dict-like
-            must return: engineered_data_path: str
-            should return: summary: str (or agent_b_summary)
-      - agent_c.run(engineered_data_path: str, agent_b_summary: str, target: str) -> dict-like
-            should return: final_metrics, final_code, training_log, decisions, logs
+      A: DataCleanerAgent.run(raw_csv_path, feedback=None, previous_decisions=None, run_id=None) -> AgentAHandoff
+      B: FeatureEngineerAgent.run(clean_data_path, agent_a_summary, target, run_id=None) -> AgentBHandoff
+      C: ModelTrainerAgent.run(engineered_data_path, agent_b_summary, target) -> AgentCResult
+
+    Persists artifacts under runs/<run_id>/.
     """
 
     def __init__(
@@ -49,12 +47,14 @@ class DataScienceTeam:
         agent_c: Any,
         runs_dir: str = "runs",
         copy_inputs: bool = True,
+        snapshot_intermediate_csvs: bool = True,
     ) -> None:
         self.agent_a = agent_a
         self.agent_b = agent_b
         self.agent_c = agent_c
         self.runs_dir = runs_dir
         self.copy_inputs = copy_inputs
+        self.snapshot_intermediate_csvs = snapshot_intermediate_csvs
 
     def _new_run_id(self) -> str:
         ts = time.strftime("%Y%m%d_%H%M%S")
@@ -62,27 +62,26 @@ class DataScienceTeam:
 
     def run(
         self,
-        raw_data_path: str,
+        raw_csv_path: str,
         target: str,
         run_id: Optional[str] = None,
-        extra: Optional[Dict[str, Any]] = None,
+        feedback: Optional[str] = None,
+        previous_decisions: Optional[list[dict]] = None,
     ) -> Dict[str, Any]:
         """
-        Executes the full pipeline and returns a small summary dict.
-        Always writes intermediate artifacts after each stage completes.
+        Returns a compact summary dict, and writes artifacts to runs/<run_id>/.
 
-        Returns:
-          {
-            "run_id": ...,
-            "raw_data_path": ...,
-            "engineered_data_path": ...,
-            "target": ...,
-            "final_metrics": {...},
-            "status": "success" | "failed",
-            "error": "... optional ..."
-          }
+        summary = {
+          "run_id": ...,
+          "raw_csv_path": ...,
+          "clean_data_path": ...,
+          "engineered_data_path": ...,
+          "target": ...,
+          "final_metrics": {...},
+          "status": "success"|"failed",
+          "error": "... optional ..."
+        }
         """
-        extra = extra or {}
         run_id = run_id or self._new_run_id()
 
         run_root = os.path.join(self.runs_dir, run_id)
@@ -97,79 +96,102 @@ class DataScienceTeam:
 
         summary: Dict[str, Any] = {
             "run_id": run_id,
-            "raw_data_path": raw_data_path,
+            "raw_csv_path": raw_csv_path,
+            "clean_data_path": None,
             "engineered_data_path": None,
             "target": target,
             "final_metrics": {},
             "status": "failed",
         }
 
-        # Snapshot inputs metadata
+        # snapshot inputs metadata
         input_meta = {
             "run_id": run_id,
-            "raw_data_path": raw_data_path,
+            "raw_csv_path": raw_csv_path,
             "target": target,
+            "feedback": feedback,
             "started_at_unix": time.time(),
-            "extra": extra,
         }
         _write_json(os.path.join(d_inputs, "input_meta.json"), input_meta)
 
         if self.copy_inputs:
             try:
-                shutil.copy2(raw_data_path, os.path.join(d_inputs, os.path.basename(raw_data_path)))
+                shutil.copy2(raw_csv_path, os.path.join(d_inputs, os.path.basename(raw_csv_path)))
             except Exception:
-                # input might be huge or missing in tests; best effort
                 pass
 
         try:
-            # Agent A
+            # -------------------------
+            # Agent A: cleaning
+            # -------------------------
             t0 = time.time()
-            a_res = self.agent_a.run(raw_data_path=raw_data_path, target=target, **extra)
+            a_res = self.agent_a.run(
+                raw_csv_path=raw_csv_path,
+                feedback=feedback,
+                previous_decisions=previous_decisions,
+                run_id=run_id,
+            )
             a_plain = _to_plain(a_res)
             _write_json(os.path.join(d_a, "agent_a_result.json"), a_plain)
             _write_json(os.path.join(d_a, "timing.json"), {"seconds": time.time() - t0})
 
-            agent_a_summary = ""
-            if isinstance(a_plain, dict):
-                agent_a_summary = a_plain.get("summary") or ""
-            if not agent_a_summary:
-                # fall back to a compact string version
-                agent_a_summary = json.dumps(a_plain, ensure_ascii=False)[:6000]
+            if not isinstance(a_plain, dict):
+                raise PipelineError("Agent A must return a dict-like object (dataclass OK).")
 
-            # Agent B
+            clean_data_path = a_plain.get("clean_data_path")
+            agent_a_summary = a_plain.get("audit_summary")  # <-- correct field name
+
+            if not clean_data_path or not isinstance(clean_data_path, str):
+                raise PipelineError("Agent A did not return clean_data_path (string).")
+            if not agent_a_summary or not isinstance(agent_a_summary, str):
+                agent_a_summary = "(no audit_summary provided)"
+
+            summary["clean_data_path"] = clean_data_path
+
+            # snapshot clean csv into run folder (optional)
+            if self.snapshot_intermediate_csvs:
+                try:
+                    shutil.copy2(clean_data_path, os.path.join(d_a, os.path.basename(clean_data_path)))
+                except Exception:
+                    pass
+
+            # -------------------------
+            # Agent B: feature engineering
+            # -------------------------
             t0 = time.time()
             b_res = self.agent_b.run(
-                raw_data_path=raw_data_path,
-                target=target,
+                clean_data_path=clean_data_path,
                 agent_a_summary=agent_a_summary,
-                **extra,
+                target=target,
+                run_id=run_id,
             )
             b_plain = _to_plain(b_res)
             _write_json(os.path.join(d_b, "agent_b_result.json"), b_plain)
             _write_json(os.path.join(d_b, "timing.json"), {"seconds": time.time() - t0})
 
             if not isinstance(b_plain, dict):
-                raise PipelineError("Agent B must return a dict-like object including engineered_data_path")
+                raise PipelineError("Agent B must return a dict-like object (dataclass OK).")
 
             engineered_data_path = b_plain.get("engineered_data_path")
-            if not engineered_data_path or not isinstance(engineered_data_path, str):
-                raise PipelineError("Agent B did not return engineered_data_path (string)")
+            agent_b_summary = b_plain.get("strategy_summary")  # <-- correct field name
 
-            agent_b_summary = (
-                b_plain.get("summary")
-                or b_plain.get("agent_b_summary")
-                or "(no agent_b_summary provided)"
-            )
+            if not engineered_data_path or not isinstance(engineered_data_path, str):
+                raise PipelineError("Agent B did not return engineered_data_path (string).")
+            if not agent_b_summary or not isinstance(agent_b_summary, str):
+                agent_b_summary = "(no strategy_summary provided)"
 
             summary["engineered_data_path"] = engineered_data_path
 
-            # Snapshot engineered csv into run folder (best effort)
-            try:
-                shutil.copy2(engineered_data_path, os.path.join(d_b, os.path.basename(engineered_data_path)))
-            except Exception:
-                pass
+            # snapshot engineered csv into run folder (optional)
+            if self.snapshot_intermediate_csvs:
+                try:
+                    shutil.copy2(engineered_data_path, os.path.join(d_b, os.path.basename(engineered_data_path)))
+                except Exception:
+                    pass
 
-            # Agent C
+            # -------------------------
+            # Agent C: model training
+            # -------------------------
             t0 = time.time()
             c_res = self.agent_c.run(
                 engineered_data_path=engineered_data_path,
@@ -180,23 +202,27 @@ class DataScienceTeam:
             _write_json(os.path.join(d_c, "agent_c_result.json"), c_plain)
             _write_json(os.path.join(d_c, "timing.json"), {"seconds": time.time() - t0})
 
-            # Convenience outputs
-            if isinstance(c_plain, dict):
-                final_code = c_plain.get("final_code") or ""
-                training_log = c_plain.get("training_log") or ""
-                final_metrics = c_plain.get("final_metrics") or {}
+            if not isinstance(c_plain, dict):
+                raise PipelineError("Agent C must return a dict-like object (dataclass OK).")
 
-                if final_code:
-                    with open(os.path.join(d_c, "final_code.py"), "w", encoding="utf-8") as f:
-                        f.write(final_code)
+            final_metrics = c_plain.get("final_metrics") or {}
+            summary["final_metrics"] = final_metrics
 
-                if training_log:
-                    with open(os.path.join(d_c, "training_log.txt"), "w", encoding="utf-8") as f:
-                        f.write(training_log)
+            # convenience outputs for quick debugging
+            final_code = c_plain.get("final_code") or ""
+            training_log = c_plain.get("training_log") or ""
 
-                summary["final_metrics"] = final_metrics
+            if final_code:
+                with open(os.path.join(d_c, "final_code.py"), "w", encoding="utf-8") as f:
+                    f.write(final_code)
 
+            if training_log:
+                with open(os.path.join(d_c, "training_log.txt"), "w", encoding="utf-8") as f:
+                    f.write(training_log)
+
+            # -------------------------
             # Final bundle
+            # -------------------------
             summary["status"] = "success"
             summary["finished_at_unix"] = time.time()
 

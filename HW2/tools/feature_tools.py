@@ -128,55 +128,66 @@ def encode_categorical(df: pd.DataFrame, col: str, method: str = "onehot") -> Tu
 
 def correlation_analysis(df: pd.DataFrame, target: str, top_n: int = 20) -> Dict[str, Any]:
     if target not in df.columns:
-        raise KeyError(f"Target column not found: {target}")
+        raise ValueError(f"target '{target}' not found in dataframe")
 
-    y = df[target]
-    warnings: List[str] = []
-    scores: List[Dict[str, Any]] = []
+    df2 = df.replace([np.inf, -np.inf], np.nan)
 
-    # Make numeric target if possible
-    y_num = pd.to_numeric(y, errors="coerce")
-    if y_num.isna().all():
-        warnings.append("Target could not be coerced to numeric; using label codes as proxy.")
-        y_num = y.astype("string").fillna("__NA__").astype("category").cat.codes
+    # Keep only numeric cols for correlation
+    num = df2.select_dtypes(include=["number"]).copy()
 
-    for col in df.columns:
+    if target not in num.columns:
+        # target is non-numeric (classification labels might be object) => try coercion
+        coerced = pd.to_numeric(df2[target], errors="coerce")
+        if coerced.isna().all():
+            return {
+                "action": "correlation_analysis",
+                "ok": False,
+                "reason": f"Target '{target}' is not numeric and could not be coerced; skip correlation.",
+                "top_features": [],
+                "numeric_feature_count": int(num.shape[1]),
+            }
+        num[target] = coerced
+
+    # Drop columns that are entirely NaN
+    num = num.dropna(axis=1, how="all")
+
+    # Fill NaNs for correlation computation only
+    med = num.median(numeric_only=True)
+    num = num.fillna(med)
+
+    # If target became constant after fill, correlations are meaningless
+    if num[target].nunique(dropna=True) <= 1:
+        return {
+            "action": "correlation_analysis",
+            "ok": False,
+            "reason": f"Target '{target}' is constant after cleaning; correlations undefined.",
+            "top_features": [],
+            "numeric_feature_count": int(num.shape[1]),
+        }
+
+    # Compute correlation with target for each feature (no full matrix)
+    tgt = num[target]
+    rows: List[Dict[str, Any]] = []
+    for col in num.columns:
         if col == target:
             continue
-
-        s = df[col]
-        note = ""
-
-        if pd.api.types.is_numeric_dtype(s):
-            x = pd.to_numeric(s, errors="coerce")
-        else:
-            # Rough proxy signal for categorical
-            note = "categorical_encoded_proxy"
-            x = s.astype("string").fillna("__NA__").astype("category").cat.codes
-
-        # Correlation requires finite
-        x = pd.to_numeric(x, errors="coerce")
-        mask = (~x.isna()) & (~y_num.isna())
-        if mask.sum() < 3:
+        s = num[col]
+        # skip constant features
+        if s.nunique(dropna=True) <= 1:
             continue
+        c = s.corr(tgt)
+        if pd.notna(c):
+            rows.append({"feature": col, "corr_with_target": float(c)})
 
-        x_std = float(x[mask].std())
-        y_std = float(y_num[mask].std())
-        if x_std == 0.0 or y_std == 0.0:
-            continue
+    rows.sort(key=lambda r: abs(r["corr_with_target"]), reverse=True)
+    top = rows[: int(top_n)]
 
-        corr = float(np.corrcoef(x[mask], y_num[mask])[0, 1])
-        if np.isnan(corr):
-            continue
-
-        scores.append({"feature": col, "score": abs(corr), "note": note})
-
-    scores.sort(key=lambda d: d["score"], reverse=True)
     return {
         "action": "correlation_analysis",
-        "target": target,
-        "scores": scores[: int(top_n)],
-        "warnings": warnings,
+        "ok": True,
+        "top_features": top,
+        "numeric_feature_count": int(num.shape[1]),
+        "note": "Computed corr(feature,target) only (fast), not full correlation matrix.",
     }
 
 
