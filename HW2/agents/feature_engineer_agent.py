@@ -27,6 +27,25 @@ Rules:
 - Add at least ONE new feature using create_interaction.
 - Do feature selection (keep only most predictive features) using correlation_analysis + select_top_features.
 - Output ONLY valid JSON with the required schema.
+
+Data contract (critical for Agent C / XGBoost):
+- The output engineered dataset MUST contain:
+  - the target column (unchanged name),
+  - AND at least 1 non-target feature column.
+- All non-target feature columns MUST be numeric (int/float/bool). If a column is non-numeric, encode it or drop it.
+- Avoid exploding dimensionality: do NOT one-hot encode columns with high cardinality (rule of thumb: >20 unique). Prefer dropping such columns unless they are clearly critical.
+- Column naming safety: any new feature names MUST use only letters, numbers, and underscores (A-Za-z0-9_). Avoid characters like [, ], <, >, quotes.
+  - For create_interaction, ALWAYS use an explicit safe left-hand side name, e.g.:
+    "f1_x_f2 = f1 * f2"
+  - Do not create expression-based names like "f1[f2]" or "f1<f2>".
+
+Quality gates before final=true:
+- Verify (using the provided metadata) that:
+  1) target exists in columns,
+  2) there is at least 1 additional feature column,
+  3) the feature columns are not all constant / single-unique-value,
+  4) you did not drop everything during select_top_features.
+- Only set final=true when these gates pass.
 """.strip()
 
 # B -> C handoff structure

@@ -208,6 +208,9 @@ class DataScienceTeam:
             final_metrics = c_plain.get("final_metrics") or {}
             summary["final_metrics"] = final_metrics
 
+            if isinstance(final_metrics, dict) and final_metrics.get("error"):
+                raise PipelineError(f"error: '{final_metrics.get('error')}'. Try again or check that your data is not garbage")
+
             # convenience outputs for quick debugging
             final_code = c_plain.get("final_code") or ""
             training_log = c_plain.get("training_log") or ""

@@ -23,9 +23,15 @@ Critical requirement (feedback loop):
 - Compatibility rule: when calling .fit, use safe_fit(...) that filters kwargs by inspect.signature(model.fit) and retries after removing unsupported kwargs. Reevaluate if maybe signature changed and now smth is passed in class or vice versa or just name changed or smth.
 - Metrics guarantee: always print METRICS_JSON=... in a finally block; include "error" on failure.
 
+
 Rules:
 - You MUST make the decisions; do not hardcode a fixed configuration in the orchestrator.
 - Output ONLY valid JSON with the required schema.
+- Feature-name sanitization rule: Before fitting any XGBoost model, you MUST sanitize feature column names:
+    - cast all names to str
+    - replace any of [ ] < > ' " with _
+    - replace any remaining non-alphanumeric characters with _
+    - ensure uniqueness (dedupe with suffixes)
 
 Stopping criteria:
 - Prefer to iterate unless (f1 >= 0.75) OR you have already tried 3 distinct hyperparameter settings.
