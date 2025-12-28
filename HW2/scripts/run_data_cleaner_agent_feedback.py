@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-import bootstrap
+import bootstrap # noqa: F401
 from agents.data_cleaner_agent import DataCleanerAgent
 
 def main():
