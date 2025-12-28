@@ -1,4 +1,4 @@
-# tests/test_agent_c.py
+# tests/test_model_trainer_agent.py
 from pathlib import Path
 import pandas as pd
 import pytest
