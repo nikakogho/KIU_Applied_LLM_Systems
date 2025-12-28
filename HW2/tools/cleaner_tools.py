@@ -165,3 +165,113 @@ def drop_column(df: pd.DataFrame, col: str) -> Tuple[pd.DataFrame, Dict[str, Any
 
     new_df = df.drop(columns=[col]).copy()
     return new_df, {"action": "drop_column", "col": col, "dropped": True}
+
+CLEANER_TOOLS_SPEC = """
+Cleaner Tools (Agent A)
+
+These are the ONLY tools you may request. You must call them by tool name exactly as written.
+All tool calls are executed by Python. You will receive the tool output back in the next message.
+
+Tool: inspect_metadata
+- Call signature (Python internal): inspect_metadata(df)
+- You CANNOT request this tool directly (Python runs it automatically at start and after changes).
+- Output (dict):
+  {
+    "shape": (n_rows, n_cols),
+    "columns": [col1, col2, ...],
+    "dtypes": { "col": "dtype_string", ... },
+    "null_counts": { "col": int, ... },
+    "null_pct": { "col": float_percent, ... },
+    "nunique": { "col": int, ... }
+  }
+- Notes:
+  - null_pct is percentage in [0, 100]
+  - nunique ignores NaN
+
+Tool: get_column_stats
+- Request format:
+  {"tool": "get_column_stats", "args": {"col": "<COLUMN_NAME>"}}
+- Input args:
+  - col (string): must exist in the dataframe
+- Output (dict) on success:
+  Numeric column:
+    {
+      "col": str,
+      "ok": true,
+      "dtype": str,
+      "n_rows": int,
+      "n_null": int,
+      "null_pct": float,
+      "describe": {
+        "count": number,
+        "mean": number|null,
+        "std": number|null,
+        "min": number|null,
+        "1%": number|null,
+        "5%": number|null,
+        "50%": number|null,
+        "95%": number|null,
+        "99%": number|null,
+        "max": number|null
+      },
+      "iqr_outlier_bounds": {"low": float, "high": float}|null,
+      "n_iqr_outliers": int
+    }
+  Non-numeric column:
+    {
+      "col": str,
+      "ok": true,
+      "dtype": str,
+      "n_rows": int,
+      "n_null": int,
+      "null_pct": float,
+      "top_values": {"value": count, ...},
+      "sample_values": [str, str, ...],
+      "n_unique_non_null": int
+    }
+- Output on failure:
+  {"col": "<COLUMN_NAME>", "ok": false, "error": "column_not_found"}
+
+Tool: impute_missing
+- Request format:
+  {"tool": "impute_missing", "args": {"col": "<COLUMN_NAME>", "strategy": "<STRATEGY>"}}
+- Input args:
+  - col (string): must exist
+  - strategy (string): one of {"mean", "median", "mode"} (case-insensitive)
+- Behavior:
+  - Fills ONLY missing (NaN) values in that column.
+  - mean/median require numeric dtype; otherwise the tool raises an error.
+  - mode works on any dtype but fails if mode is empty (e.g., all values NaN).
+- Output (dict) on success:
+  {
+    "action": "impute_missing",
+    "col": str,
+    "strategy": "mean"|"median"|"mode",
+    "fill_value": any,
+    "na_before": int,
+    "na_after": int,
+    "note": "no_missing_values"   # only present when na_before == 0
+  }
+- Errors you may see:
+  - KeyError: column not found
+  - TypeError: non-numeric with mean/median
+  - ValueError: invalid strategy or computed statistic is NaN / mode empty
+
+Tool: drop_column
+- Request format:
+  {"tool": "drop_column", "args": {"col": "<COLUMN_NAME>"}}
+- Input args:
+  - col (string)
+- Behavior:
+  - Drops the entire column if present.
+- Output (dict):
+  Success:
+    {"action": "drop_column", "col": str, "dropped": true}
+  Not found:
+    {"action": "drop_column", "col": str, "dropped": false, "reason": "not_found"}
+
+General guidance for tool usage:
+- If unsure about a column, call get_column_stats before deciding.
+- Prefer minimal cleaning; do not drop columns unless clearly unusable (e.g., IDs with near-unique values).
+- Use impute_missing for moderate missingness when it makes sense.
+""".strip()

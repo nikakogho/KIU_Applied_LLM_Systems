@@ -12,7 +12,22 @@ from tools.cleaner_tools import (
     get_column_stats,
     impute_missing,
     drop_column,
+    CLEANER_TOOLS_SPEC
 )
+
+DATA_CLEANER_AGENT_DESCRIPTION = """
+You are Agent A: a data auditor/cleaner.
+
+Goal:
+- Inspect a CSV dataframe, identify missingness / suspicious columns, and propose cleaning actions.
+
+Rules:
+- You MUST output ONLY valid JSON with the schema described below. No markdown, no extra text.
+- Prefer minimal, reasonable cleaning.
+- Do not invent columns.
+- If feedback forbids an action, comply.
+- If you need more info about a column, request get_column_stats first.
+""".strip()
 
 # Handoff object A -> B
 @dataclass
@@ -87,31 +102,24 @@ class DataCleanerAgent:
 
     def _system_prompt(self) -> str:
         return (
-            "You are Agent A: a data auditor/cleaner.\n"
-            "Goal: inspect a CSV dataframe, identify missingness / bad columns, and propose cleaning actions.\n"
-            "You MUST output ONLY valid JSON with the schema described.\n\n"
-            "You can request these tools by name (the orchestrator will execute them):\n"
-            "- get_column_stats(col)\n"
-            "- impute_missing(col, strategy) where strategy in {mean, median, mode}\n"
-            "- drop_column(col)\n\n"
-            "IMPORTANT:\n"
-            "- Prefer minimal, reasonable cleaning.\n"
-            "- Do not invent columns.\n"
-            "- If feedback forbids an action, comply.\n\n"
-            "JSON schema you must output:\n"
-            "{\n"
-            '  "tool_requests": [\n'
-            "     {\"tool\": \"get_column_stats\", \"args\": {\"col\": \"...\"}},\n"
-            "     {\"tool\": \"impute_missing\", \"args\": {\"col\": \"...\", \"strategy\": \"median\"}},\n"
-            "     {\"tool\": \"drop_column\", \"args\": {\"col\": \"...\"}}\n"
-            "  ],\n"
-            '  "decisions": [\n'
-            "     {\"action\": \"impute_missing\", \"col\": \"...\", \"strategy\": \"median\", \"reason\": \"...\"},\n"
-            "     {\"action\": \"drop_column\", \"col\": \"...\", \"reason\": \"...\"}\n"
-            "  ],\n"
-            '  "audit_summary": \"short human-readable summary\",\n'
-            '  "final": true/false\n'
-            "}\n"
+            DATA_CLEANER_AGENT_DESCRIPTION
+            + "\n\n"
+            + CLEANER_TOOLS_SPEC
+            + "\n\n"
+            + "Output format: ONLY valid JSON (no markdown, no commentary) with schema:\n"
+            + "{\n"
+            + '  "tool_requests": [\n'
+            + '    {"tool": "get_column_stats", "args": {"col": "COLUMN_NAME"}},\n'
+            + '    {"tool": "impute_missing", "args": {"col": "COLUMN_NAME", "strategy": "mean|median|mode"}},\n'
+            + '    {"tool": "drop_column", "args": {"col": "COLUMN_NAME"}}\n'
+            + "  ],\n"
+            + '  "decisions": [\n'
+            + '    {"action": "impute_missing", "col": "COLUMN_NAME", "strategy": "mean|median|mode", "reason": "..."},\n'
+            + '    {"action": "drop_column", "col": "COLUMN_NAME", "reason": "..."}\n'
+            + "  ],\n"
+            + '  "audit_summary": "short human-readable summary of what you did and why",\n'
+            + '  "final": true/false\n'
+            + "}\n"
         )
 
     def _user_prompt(
